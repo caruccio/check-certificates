@@ -9,13 +9,13 @@ default: image
 
 .PHONY: image
 image:
-	docker build . -t $(IMAGE) --no-cache
+	docker build . -t $(IMAGE)
 
 .PHONY: tag
 tag:
-	docker tag $(LATEST) $(IMAGE)
+	docker tag $(IMAGE) $(LATEST)
 
 .PHONY: push
 push: tag
-	docker push $(LATEST)
 	docker push $(IMAGE)
+	docker push $(LATEST)
