@@ -1,5 +1,5 @@
 LATEST_VERSION := v1.0
-REPOSITORY := caruccio
+REPOSITORY := getupcloud
 IMAGE_NAME := certificate-checker
 IMAGE := $(REPOSITORY)/$(IMAGE_NAME):$(LATEST_VERSION)
 LATEST := $(REPOSITORY)/$(IMAGE_NAME):latest
