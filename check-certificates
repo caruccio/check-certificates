@@ -6,6 +6,7 @@ if ! grep -q 'localhost ansible_become=false' $INVENTORY_FILE; then
 fi
 
 /usr/local/bin/run $@
+RET_VAL=$?
 
 TOTAL=$(jq .summary.total /tmp/cert-expiry-report.json || echo -1)
 WARNING=$(jq .summary.warning /tmp/cert-expiry-report.json || echo -1)
@@ -15,15 +16,82 @@ echo "-- Report start --"
 jq . /tmp/cert-expiry-report.json
 echo "-- Report end --"
 
-if (( TOTAL < 0 || WARNING < 0 || EXPIRED < 0 )); then
-    event "ERROR"
+function gen_event()
+{
+    echo "Generating event: $@"
+    local \
+        reason=$1 \
+        totalCertificates=$2 \
+        sourceComponent=CertificateCheck \
+        involvedObjectName=CertificateCheck \
+        involvedObjectNamespace=${NAMESPACE:-default} \
+        date=$(date --iso-8601=seconds -u | sed -e 's/[+-]....$/Z/') \
+        eventId=$(($(date +'%s * 1000 + %-N / 1000000'))) # milliseconds since epoch
+
+    case "$reason" in
+        Success)
+            local type=Normal
+            local message="All $totalCertificates certificates are valid"
+            ;;
+        Warning)
+            local type=Warning
+            local message="There are $totalCertificates certificates about to expire"
+            ;;
+        Expired)
+            local type=Warning
+            local message="There are $totalCertificates expired certificates"
+            ;;
+        Error)
+            local type=Warning
+            local message="Error executing ansible $PLAYBOOK_FILE"
+    esac
+
+    curl https://${KUBERNETES_SERVICE_HOST:-kubernetes.default.svc}:${KUBERNETES_SERVICE_PORT_HTTPS:-443}/api/v1/namespaces/$involvedObjectNamespace/events/ \
+        --cacert /run/secrets/kubernetes.io/serviceaccount/ca.crt \
+        -H "Authorization: Bearer $(</run/secrets/kubernetes.io/serviceaccount/token)" \
+        -H "Content-Type: application/json" \
+        -d @- <<EOF
+{
+    "apiVersion": "v1",
+    "kind": "Event",
+    "metadata": {
+      "name": "$sourceComponent.$eventId",
+      "namespace": "$involvedObjectNamespace"
+    },
+    "type": "$type",
+    "count": 1,
+    "message": "$message",
+    "firstTimestamp": "$date",
+    "lastTimestamp": "$date",
+    "reason": "$reason",
+    "involvedObject": {
+      "kind": "CertificateChecker",
+      "namespace": "$involvedObjectNamespace",
+      "name": "$involvedObjectName"
+    },
+    "reportingComponent": "certificates.getup.io/checker",
+    "reportingInstance": "$HOSTNAME",
+    "source": {
+      "component": "$sourceComponent",
+      "host": "$sourceComponent"
+    }
+}
+EOF
+}
+
+if (( RET_VAL != 0 || TOTAL < 0 || WARNING < 0 || EXPIRED < 0 )); then
+    gen_event Error
     exit 1
 fi
 
 if (( WARNING > 0 )); then
-    echo WARNING $WARNING
+    gen_event Warning $WARNING
 fi
 
 if (( EXPIRED > 0 )); then
-    echo CRITICAL $EXPIRED
+    gen_event Expired $EXPIRED
+fi
+
+if (( OK == TOTAL )); then
+    gen_event Success $TOTAL
 fi
