@@ -1,21 +1,29 @@
 #!/bin/bash
 
-
-#ansible-playbook ${PLAYBOOK_FILE:-playbooks/openshift-checks/certificate_expiry/easy-mode-upload.yaml}
-set -x
+if ! grep -q 'localhost ansible_become=false' $INVENTORY_FILE; then
+    cat - $INVENTORY_FILE >/tmp/hosts <<<"localhost ansible_become=false"
+    export INVENTORY_FILE=/tmp/hosts
+fi
 
 /usr/local/bin/run $@
 
-cat  /tmp/cert-expiry-report.json
+TOTAL=$(jq .summary.total /tmp/cert-expiry-report.json || echo -1)
+WARNING=$(jq .summary.warning /tmp/cert-expiry-report.json || echo -1)
+EXPIRED=$(jq .summary.expired /tmp/cert-expiry-report.json || echo -1)
 
-#EXPIRE_CERT=$(jq '.summary.expired' /tmp/cert-expiry-report.json)
-#domain=$(grep -w -A2 DNS /tmp/cert-expiry-report.json  | cut -d '=' -f2 | tail -n3 | head -n1| cut -d ',' -f1)
-#text="$domain certificate - expired"
-#
-#if [ $EXPIRE_CERT -ge 0 ]
-#then
-#    webhook_url=${1}
-#    channel=${1:-#integrationtests}
-#    json="{\"channel\": \"${channel}\", \"username\":\"certificates\", \"icon_emoji\":\":scream_cat:\", \"attachments\":[{\"color\":\"danger\" , \"text\": \"$text\"}]}"
-#    curl -X POST --data-urlencode  "payload=$json" "$webhook_url"
-#fi
+echo "-- Report start --"
+jq . /tmp/cert-expiry-report.json
+echo "-- Report end --"
+
+if (( TOTAL < 0 || WARNING < 0 || EXPIRED < 0 )); then
+    event "ERROR"
+    exit 1
+fi
+
+if (( WARNING > 0 )); then
+    echo WARNING $WARNING
+fi
+
+if (( EXPIRED > 0 )); then
+    echo CRITICAL $EXPIRED
+fi
