@@ -5,17 +5,6 @@ if ! grep -q 'localhost ansible_become=false' $INVENTORY_FILE; then
     export INVENTORY_FILE=/tmp/hosts
 fi
 
-/usr/local/bin/run $@
-RET_VAL=$?
-
-TOTAL=$(jq .summary.total /tmp/cert-expiry-report.json || echo -1)
-WARNING=$(jq .summary.warning /tmp/cert-expiry-report.json || echo -1)
-EXPIRED=$(jq .summary.expired /tmp/cert-expiry-report.json || echo -1)
-
-echo "-- Report start --"
-jq . /tmp/cert-expiry-report.json
-echo "-- Report end --"
-
 function gen_event()
 {
     echo "Generating event: $@"
@@ -79,7 +68,21 @@ function gen_event()
 EOF
 }
 
-if (( RET_VAL != 0 || TOTAL < 0 || WARNING < 0 || EXPIRED < 0 )); then
+if ! /usr/local/bin/run $@; then
+    gen_event Error
+    exit 1
+fi
+
+TOTAL=$(jq .summary.total /tmp/cert-expiry-report.json || echo -1)
+WARNING=$(jq .summary.warning /tmp/cert-expiry-report.json || echo -1)
+EXPIRED=$(jq .summary.expired /tmp/cert-expiry-report.json || echo -1)
+
+echo "-- Report start --"
+jq . /tmp/cert-expiry-report.json
+echo "-- Report end --"
+
+
+if (( TOTAL < 0 || WARNING < 0 || EXPIRED < 0 )); then
     gen_event Error
     exit 1
 fi
